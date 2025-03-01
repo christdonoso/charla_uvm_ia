@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pose Detection</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.4/pose.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #f0f0f0;
+        }
+        video, canvas {
+            position: absolute;
+        }
+    </style>
+</head>
+<body>
+    <video id="video" width="640" height="480" autoplay></video>
+    <canvas id="canvas" width="640" height="480"></canvas>
+    <script>
+        async function setupCamera() {
+            const video = document.getElementById('video');
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            return new Promise((resolve) => {
+                video.onloadedmetadata = () => {
+                    video.play();
+                    resolve(video);
+                };
+            });
+        }
+
+        function calcularAngulo(a, b, c) {
+            const radian = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+            let angle = Math.abs((radian * 180) / Math.PI);
+            if (angle > 180.0) {
+                angle = 360 - angle;
+            }
+            return Math.round(angle * 100) / 100;
+        }
+
+        async function main() {
+            const video = await setupCamera();
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+
+            const pose = new Pose({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+            });
+
+            pose.setOptions({
+                modelComplexity: 1,
+                smoothLandmarks: true,
+                enableSegmentation: false,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            // Variables para el conteo
+            let count = 0; // Número de repeticiones
+            let isFlexed = false; // Estado actual (flexionado o no)
+
+            pose.onResults((results) => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                if (results.poseLandmarks) {
+                    const keypoints = results.poseLandmarks;
+                    const shoulder = keypoints[11]; // Hombro izquierdo
+                    const elbow = keypoints[13];    // Codo izquierdo
+                    const hip = keypoints[23];      // Cadera izquierda
+
+                    if (shoulder && elbow && hip) {
+                        const angle = calcularAngulo(hip, shoulder, elbow);
+
+                        // Mostrar el ángulo en el canvas
+                        ctx.fillStyle = 'red';
+                        ctx.font = '20px Arial';
+                        ctx.fillText(`Ángulo: ${angle}°`, shoulder.x * canvas.width, shoulder.y * canvas.height - 10);
+
+                        // Dibujar puntos clave
+                        [shoulder, elbow, hip].forEach(point => {
+                            ctx.beginPath();
+                            ctx.arc(point.x * canvas.width, point.y * canvas.height, 5, 0, 2 * Math.PI);
+                            ctx.fillStyle = 'blue';
+                            ctx.fill();
+                        });
+
+                        // Lógica de conteo
+                        if (angle < 30) {
+                            // Brazo flexionado
+                            if (!isFlexed) {
+                                isFlexed = true; // Cambiar estado a flexionado
+                            }
+                        } else if (angle > 160) {
+                            // Brazo extendido
+                            if (isFlexed) {
+                                count++; // Incrementar el conteo al extender el brazo
+                                isFlexed = false; // Cambiar estado a extendido
+                            }
+                        }
+
+                        // Mostrar el conteo en el canvas
+                        ctx.fillStyle = 'green';
+                        ctx.font = '30px Arial';
+                        ctx.fillText(`Repeticiones: ${count}`, 20, 50);
+                    }
+                }
+            });
+
+            async function detect() {
+                await pose.send({ image: video });
+                requestAnimationFrame(detect);
+            }
+
+            detect();
+        }
+
+        main();
+    </script>
+</body>
+</html>
